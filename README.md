@@ -176,19 +176,39 @@ Can't write a fit card yet: there is no outfit suggestion to base it on.
      `python run_eval.py --label before` runs everything and writes the table
      into results/. Paste it here and fill in the verdicts. -->
 
-| Criterion | Target | Try 1 | Try 2 | Try 3 | Try 4 | Try 5 | Verdict |
-| --------- | ------ | ----- | ----- | ----- | ----- | ----- | ------- |
-| 1.        |        |       |       |       |       |       |         |
-| 2.        |        |       |       |       |       |       |         |
-| 3.        |        |       |       |       |       |       |         |
-| 4.        |        |       |       |       |       |       |         |
-| 5.        |        |       |       |       |       |       |         |
+Run Log — Before
+Criterion Target Try 1 Try 2 Try 3 Try 4 Try 5 Verdict
+
+1. A matching query completes all three tools 4 of 5 PASS PASS PASS PASS PASS MET (5/5)
+2. An impossible query stops before the second tool 5 of 5 PASS PASS PASS PASS PASS MET (5/5)
+3. The item found by search is the item the next tool receives 5 of 5 N/A N/A N/A N/A N/A UNVERIFIABLE — trace never logged the item's id, only its title
+4. The fit card is a usable caption (5 regenerations) 4 of 5 PASS PASS PASS PASS PASS MET (5/5)
+5. Search respects the price ceiling (5 queries) 5 of 5 queries, 0 violations PASS PASS PASS PASS PASS MET on the single query actually tested — doesn't satisfy "5 queries" as written
 
 **Real output from one try**, pasted as text, naming the file and function
 that produced it:
 
 ```
+Produced by run_eval.py::run_once -> agent.py::run_agent, calling tools.py::search_listings
+(via mcp_server.py), tools.py::suggest_outfit, tools.py::create_fit_card
 
+Query: vintage graphic tee under $30
+
+[1] parse_query
+      in:  vintage graphic tee under $30
+      out: dict with keys: description, size, max_price
+[2] search_listings (via MCP)
+      in:  dict with keys: description, size, max_price
+      out: 10 items: Y2K Baby Tee — Butterfly Print, Vintage Band Tee — Faded Grey, Graphic Tee — 2003 Tour Bootleg Style … +7 more
+[3] select_item
+      in:  10 candidates
+      out: Y2K Baby Tee — Butterfly Print ($18.0, depop)
+[4] suggest_outfit
+      in:  dict with keys: item, wardrobe_items
+      out: Hey bestie! At just $18, this Y2K butterfly baby tee is an absolute Depop steal. ...
+[5] create_fit_card
+      in:  dict with keys: item
+      out: Found the absolute cutest Y2K Baby Tee — Butterfly Print on Depop for only $18! The pink and purple graphic gives major early 2000s off-duty model energy, and I am so obsessed with how it fits. Can't wait to style this with some baggy denim and chunky sneakers!
 ```
 
 ---
@@ -211,17 +231,20 @@ that produced it:
      Look for a pattern. Three misses on the same tool is one problem, not
      three. -->
 
-| #   | Criterion | Target | Verdict | How I decided |
-| --- | --------- | ------ | ------- | ------------- |
-| 1   |           |        |         |               |
-| 2   |           |        |         |               |
-| 3   |           |        |         |               |
-| 4   |           |        |         |               |
-| 5   |           |        |         |               |
+Verdicts and Diagnoses
+
+# Criterion Target Verdict How I decided
+
+1 A matching query completes all three tools 4/5 MET (5/5) All 5 tries reached create_fit_card without session["error"] being set, per the trace output.
+2 An impossible query stops before the second tool 5/5 MET (5/5) All 5 tries hit branch: empty search and returned before suggest_outfit ran.
+3 Item id stays consistent across select_item -> suggest_outfit -> create_fit_card 5/5 MISSED — unverifiable agent.py::run_agent's trace.step() calls for steps 4 and 5 only ever logged item.get("title"), never item.get("id"). The item's title stayed consistent across all 5 tries, which is suggestive, but the criterion specifically asks for an id comparison (precisely because two items could share a title), and that evidence was never captured.
+4 Fit card is a usable caption (5 regenerations) 4/5 MET (5/5) All 5 cards were 2–4 sentences and named $26 and depop once each. No two openings were byte-identical. Worth flagging anyway: 2 of 5 followed the near-identical template "Scored this [item] on depop for [just/only] $26 and I am [adverb] never taking it off," which passes the literal rule but is the templating the criterion was written to catch.
+5 Search respects the price ceiling (5 queries) 5 queries, 0 violations MISSED — doesn't test what's written scenarios.py had one scenario for this criterion, run 5 times with the identical query "graphic tee under $30". All 5 tries returned the same $15 item, so this demonstrates 0 violations across 1 query repeated, not across 5 distinct price ceilings.
 
 **Diagnoses**
 
----
+Criterion 3 — loop/tracing gap, not a tool or session bug. The item dict almost certainly does flow through the session unchanged (nothing in agent.py copies or reconstructs session["selected_item"] between steps), but run_agent's own instrumentation never recorded the one field (id) that would prove it. Place: agent.py::run_agent's trace.step() calls. Mechanism: those calls build an inputs dict with {"item": session["selected_item"].get("title"), ...} and never include .get("id").
+Criterion 5 — test design gap, not a tools.py bug. search_listings's price filter (item["price"] > max_price, a plain comparison) is not implicated by anything in this run — every item returned respected its ceiling. The gap is that scenarios.py encoded the criterion as one scenario with 5 tries of the same query, when the criterion calls for 5 different queries, each with a price ceiling, checked once.
 
 ## Loop Trace
 
@@ -238,13 +261,35 @@ that produced it:
 **Happy path**
 
 ```
-
+[1] parse_query
+      in:  vintage graphic hoodie
+      out: dict with keys: description, size, max_price
+[2] search_listings (via MCP)
+      in:  dict with keys: description, size, max_price
+      out: 10 items: Vintage Graphic Hoodie — Faded Black, Y2K Baby Tee — Butterfly Print, Vintage Band Tee — Faded Grey … +7 more
+[3] select_item
+      in:  10 candidates
+      out: Vintage Graphic Hoodie — Faded Black ($26.0, depop)
+[4] suggest_outfit
+      in:  dict with keys: item, wardrobe_items
+      out: **Outfit 1: Effortless Grunge Streetwear** Pair the vintage graphic hoodie with your baggy dark-wash straight-…
+[5] create_fit_card
+      in:  dict with keys: item
+      out: Scored this Vintage Graphic Hoodie on depop for just $26 and I am never taking it off. That perfectly faded bl…
 ```
 
 **Empty search**
 
 ```
-
+[1] parse_query
+      in:  designer ballgown size XXS under $5
+      out: dict with keys: description, size, max_price
+[2] search_listings (via MCP)
+      in:  dict with keys: description, size, max_price
+      out: [] (empty)
+[3] branch: empty search
+      out: Nothing matched 'designer ballgown'. To get results, raise your price limit above $5, or try a different size …
+      →    stopping before suggest_outfit
 ```
 
 **On the MCP move:** <!-- what changed in your code, and whether anything
@@ -262,23 +307,29 @@ full. -->
      `python run_eval.py --label after` -->
 
 **What I changed:**
-
+What I changed: Two things. (1) In agent.py, added item_id to the inputs dict logged for the suggest_outfit trace step, so the item's id — not just its title — would be visible alongside select_item's output. (2) In scenarios.py, replaced the single "price ceiling" scenario (one query, run 5 times) with 5 scenarios, each a different query with a different price ceiling, each needing only 1 try since the price filter is deterministic — which required adding a per-scenario "tries" override, read in run_eval.py's main loop via scenario.get("tries", args.tries).
 **Which failure it was meant to fix:**
+Which failure it was meant to fix: Criterion 5's "one query isn't five queries" gap, and criterion 3's missing id evidence.
 
 ### Run Log — After
 
-| Criterion | Target | Try 1 | Try 2 | Try 3 | Try 4 | Try 5 | Verdict |
-| --------- | ------ | ----- | ----- | ----- | ----- | ----- | ------- |
-| 1.        |        |       |       |       |       |       |         |
-| 2.        |        |       |       |       |       |       |         |
-| 3.        |        |       |       |       |       |       |         |
-| 4.        |        |       |       |       |       |       |         |
-| 5.        |        |       |       |       |       |       |         |
+Run Log — After
+Criterion Target Try 1 Try 2 Try 3 Try 4 Try 5 Verdict
+
+1. A matching query completes all three tools 4/5 PASS PASS PASS PASS PASS MET (5/5)
+2. An impossible query stops before the second tool 5/5 PASS PASS PASS PASS PASS MET (5/5)
+3. Item id stays consistent 5/5 N/A N/A N/A N/A N/A STILL UNVERIFIABLE — see below
+4. Fit card is a usable caption (5 regenerations) 4/5 PASS PASS PASS PASS PASS MET (5/5)
+5. Search respects the price ceiling (5 distinct queries: tee<=$30, jacket<=$45, flannel<=$25, hoodie<=$30, mesh top<=$20) 5/5, 0 violations PASS PASS PASS PASS PASS MET (5/5) — $15, $42, $22, $26, $15, all under their ceilings
 
 **Did it help, and how do I know:**
 
 <!-- If it made things worse, say that. Honestly reported, that earns full
      credit and is more interesting than one that worked. -->
+
+     Criterion 5 — yes, clearly. The after-run actually exercises 5 distinct price ceilings instead of one query repeated, and all 5 returned non-empty results that respected their ceiling. That's the criterion as originally written, satisfied for the first time.
+
+Criterion 3 — no, my fix didn't work, and I know because the new trace still reads in: dict with keys: item_id, item, wardrobe_items for suggest_outfit — that's just the key names, not the actual id value; every dict-typed input in this whole log renders the same way (e.g. parse_query's output is always printed as dict with keys: description, size, max_price, never the values). So adding item_id as a dict key didn't make it visible. On top of that, I never made the matching edit to create_fit_card's trace call — it still only logs dict with keys: item, unchanged from the before run. This criterion needs a real fix, not the one I tried.
 
 ---
 
@@ -287,6 +338,11 @@ full. -->
 <!-- For each criterion still missed: what you'd do, and why you stopped where
      you did. "I ran out of time" is fine if it's true. Pretending nothing is
      left is not. -->
+
+     Criterion 3 is still unmeasured. The real fix is to stop passing the id inside a dict (which trace.step() collapses to key-names-only) and instead bake it into a formatted string, e.g. inputs=f"item_id={session['selected_item'].get('id')}", applied to both the suggest_outfit and create_fit_card trace calls. I ran out of time to confirm this against trace.py's actual formatting logic before submitting, so I'm reporting it as unresolved rather than claiming a fix that isn't verified.
+
+Criterion 4's templating risk. All 5 fit cards pass the letter of "no shared opening sentence," but 2–3 of 5 across both runs lean on the same "scored + item + price + and I am [adverb] never taking it off" structure. Not a failure by the written rule, but if I had more time I'd tighten create_fit_card's prompt in tools.py to explicitly ask for varied sentence openings, then re-test.
+select_item always takes index [0] from the search results — no criterion tests whether that's actually the "best" choice (vs. closest to budget, best condition, etc.), so this is unexplored, not necessarily broken.
 
 <!-- ═════════════════════════════════════════════════════════════════════
 

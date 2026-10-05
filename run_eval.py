@@ -92,9 +92,9 @@ def main():
     for scenario in scenario_module.SCENARIOS:
         print(f"{scenario['name']}  ({scenario['wardrobe']} wardrobe)")
         print(f"  query: {scenario['query']}")
-
         tries = []
-        for attempt in range(1, args.tries + 1):
+        n_tries = scenario.get("tries", args.tries)
+        for attempt in range(1, n_tries + 1):
             record = run_once(scenario)
             tries.append(record)
 

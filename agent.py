@@ -17,7 +17,8 @@ import re
 
 import config
 import trace
-from tools import search_listings, suggest_outfit, create_fit_card
+from tools import suggest_outfit, create_fit_card
+from mcp_client import call_tool
 from generate import ModelUnavailable
 
 
@@ -103,6 +104,13 @@ def run_agent(query: str, wardrobe: dict) -> dict:
     stores the result. The branch: if search_listings returns an empty list,
     put a message in session["error"] and stop before suggest_outfit.
 
+    search_listings is called through the MCP server (mcp_server.py), via
+    mcp_client.call_tool, rather than imported and called directly. The other
+    two tools still run as plain function calls.
+
+    Every step is also recorded with trace.step(), so a run can be printed
+    back step by step (see trace.py / app.py's --trace flag).
+
     Returns:
         The session dict. Check session["error"] first — if it isn't None,
         the run ended early and the later fields will still be None.
@@ -117,34 +125,74 @@ def run_agent(query: str, wardrobe: dict) -> dict:
         # step 1: parse the query
         if not session["parsed"]:
             session["parsed"] = parse_query(session["query"])
+            trace.step(
+                "parse_query",
+                inputs=session["query"],
+                returned=session["parsed"],
+            )
 
-        # step 2: search
+        # step 2: search — routed through MCP instead of a direct call
         elif not session["searched"]:
             p = session["parsed"]
-            session["search_results"] = search_listings(
-                p["description"], p["size"], p["max_price"]
-            )
+            session["search_results"] = call_tool("search_listings", {
+                "description": p["description"],
+                "size": p["size"],
+                "max_price": p["max_price"],
+            })
             session["searched"] = True
+            trace.step(
+                "search_listings (via MCP)",
+                inputs={
+                    "description": p["description"],
+                    "size": p["size"],
+                    "max_price": p["max_price"],
+                },
+                returned=session["search_results"],
+            )
 
         # THE BRANCH: nothing came back → say what to change and stop
         elif not session["search_results"]:
             session["error"] = _empty_search_message(session["parsed"])
+            trace.step(
+                "branch: empty search",
+                returned=session["error"],
+                note="stopping before suggest_outfit",
+            )
             return session
 
         # step 3: choose an item
         elif session["selected_item"] is None:
             session["selected_item"] = session["search_results"][0]
+            trace.step(
+                "select_item",
+                inputs=f"{len(session['search_results'])} candidates",
+                returned=session["selected_item"],
+            )
 
         # step 4: outfit ideas, reading the item back out of the session
         elif session["outfit_suggestion"] is None:
             session["outfit_suggestion"] = suggest_outfit(
                 session["selected_item"], session["wardrobe"]
             )
+            trace.step(
+                "suggest_outfit",
+                inputs={
+                    "item_id": session["selected_item"].get("id"),
+                    "item": session["selected_item"].get("title"),
+                    "wardrobe_items": len((session["wardrobe"] or {}).get("items") or []),
+                },
+                returned=session["outfit_suggestion"],
+            )
 
         # step 5: fit card
         elif session["fit_card"] is None:
             session["fit_card"] = create_fit_card(
                 session["outfit_suggestion"], session["selected_item"]
+            )
+            trace.step(
+                "create_fit_card",
+                inputs={"item": session["selected_item"].get("title")},
+                returned=session["fit_card"],
             )
 
         # everything is filled in
