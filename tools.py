@@ -30,6 +30,56 @@ def _stem(word: str) -> str:
     return word[:-1] if len(word) > 3 and word.endswith("s") else word
 
 
+# ── synonyms (capstone extension) ─────────────────────────────────────────────
+# Each group is words a shopper might use for the same thing. A query word
+# matches a listing if ANY word in its group appears in the listing text.
+# Words come from the vocabulary actually present in data/listings.json.
+SYNONYM_GROUPS = [
+    {"tee", "tshirt"},
+    {"sneakers", "trainers", "kicks"},
+    {"pants", "trousers", "slacks"},
+    {"sweater", "jumper", "pullover", "knitwear", "knit"},
+    {"sweatshirt", "crewneck"},
+    {"hoodie", "hooded"},
+    {"bag", "purse", "handbag", "tote", "crossbody"},
+    {"jacket", "coat"},
+    {"boots", "boot"},
+]
+
+# Multi-word spellings rewritten before tokenizing, because _words() would
+# split "t-shirt" into "t" + "shirt" and "shirt" is a different garment.
+_PHRASES = [(re.compile(r"\bt[\s-]?shirts?\b", re.I), "tee")]
+
+
+def _build_synonym_map() -> dict[str, frozenset[str]]:
+    mapping: dict[str, set[str]] = {}
+    for group in SYNONYM_GROUPS:
+        stems = {_stem(w) for w in group}
+        for stem in stems:
+            mapping.setdefault(stem, set()).update(stems)
+    return {k: frozenset(v) for k, v in mapping.items()}
+
+
+def expand_query(description: str) -> list[frozenset[str]]:
+    """
+    Turn a description into one set of acceptable words per keyword.
+
+    "t-shirt" -> {tee, tshirt, top}. A keyword with no synonyms is a set of
+    one, so queries without synonyms behave exactly as before.
+    """
+    text = description or ""
+    for pattern, replacement in _PHRASES:
+        text = pattern.sub(replacement, text)
+    synonyms = _build_synonym_map()
+    groups = []
+    for word in _words(text):
+        if word in STOPWORDS:
+            continue
+        stem = _stem(word)
+        groups.append(synonyms.get(stem, frozenset({stem})))
+    return groups
+
+
 def _size_matches(wanted: str, listing_size: str) -> bool:
     """
     Whole-token size match, so 'M' matches 'S/M' but 'S' does not match 'US 9'
@@ -60,7 +110,7 @@ def search_listings(
         by lower price), at most config.SEARCH_RESULT_LIMIT long.
         Returns [] when nothing matches — never None.
     """
-    keywords = {_stem(w) for w in _words(description) if w not in STOPWORDS}
+    keyword_groups = expand_query(description)
     scored = []
 
     for item in load_listings():
@@ -79,7 +129,7 @@ def search_listings(
         ])
         hay_words = {_stem(w) for w in _words(haystack)}
 
-        score = len(keywords & hay_words)
+        score = sum(1 for group in keyword_groups if group & hay_words)
         if score == 0:
             continue
         scored.append((score, item))

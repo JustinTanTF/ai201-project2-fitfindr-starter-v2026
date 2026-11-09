@@ -98,7 +98,58 @@ def _empty_search_message(parsed: dict) -> str:
 
 def run_agent(query: str, wardrobe: dict) -> dict:
     """
-    Run the loop once and return the finished session.
+    Run the loop once, write one structured log record, return the session.
+
+    The record is written in a finally block, so a crash leaves a record too
+    (outcome "crashed", with the exception text) and then re-raises.
+    """
+    import time
+    import generate
+    import runlog
+    from tools import expand_query
+
+    start = time.perf_counter()
+    tokens_before = generate.token_counts()
+    calls_before = generate.call_count()
+    session = None
+    crashed = None
+    try:
+        session = _run_loop(query, wardrobe)
+        return session
+    except Exception as exc:  # noqa: BLE001 — logged, then re-raised
+        crashed = f"{type(exc).__name__}: {exc}"
+        raise
+    finally:
+        tokens_after = generate.token_counts()
+        s = session or {}
+        item = s.get("selected_item") or {}
+        ids = s.get("ids") or {}
+        if crashed:
+            outcome = "crashed"
+        elif s.get("error"):
+            outcome = "empty_search"
+        else:
+            outcome = "completed"
+        runlog.write({
+            "input": query,
+            "parsed": s.get("parsed"),
+            "synonym_groups": [sorted(g) for g in expand_query((s.get("parsed") or {}).get("description", "")) if len(g) > 1],
+            "n_results": len(s.get("search_results") or []),
+            "selected_id": item.get("id"),
+            "ids_seen": ids,
+            "outcome": outcome,
+            "output": s.get("error") or s.get("fit_card"),
+            "error": crashed,
+            "duration_s": round(time.perf_counter() - start, 3),
+            "model_calls": generate.call_count() - calls_before,
+            "prompt_tokens": tokens_after["prompt"] - tokens_before["prompt"],
+            "output_tokens": tokens_after["output"] - tokens_before["output"],
+        })
+
+
+def _run_loop(query: str, wardrobe: dict) -> dict:
+    """
+    The planning loop itself.
 
     Each pass looks at the session, decides which step is next, runs it, and
     stores the result. The branch: if search_listings returns an empty list,
@@ -116,6 +167,7 @@ def run_agent(query: str, wardrobe: dict) -> dict:
         the run ended early and the later fields will still be None.
     """
     session = new_session(query, wardrobe)
+    session["ids"] = {}  # item id as seen at each stage (for criterion: id stays consistent)
 
     count = 0
     while True:
@@ -163,6 +215,7 @@ def run_agent(query: str, wardrobe: dict) -> dict:
         # step 3: choose an item
         elif session["selected_item"] is None:
             session["selected_item"] = session["search_results"][0]
+            session["ids"]["selected"] = session["selected_item"].get("id")
             trace.step(
                 "select_item",
                 inputs=f"{len(session['search_results'])} candidates",
@@ -171,6 +224,7 @@ def run_agent(query: str, wardrobe: dict) -> dict:
 
         # step 4: outfit ideas, reading the item back out of the session
         elif session["outfit_suggestion"] is None:
+            session["ids"]["suggest_outfit"] = session["selected_item"].get("id")
             session["outfit_suggestion"] = suggest_outfit(
                 session["selected_item"], session["wardrobe"]
             )
@@ -186,6 +240,7 @@ def run_agent(query: str, wardrobe: dict) -> dict:
 
         # step 5: fit card
         elif session["fit_card"] is None:
+            session["ids"]["create_fit_card"] = session["selected_item"].get("id")
             session["fit_card"] = create_fit_card(
                 session["outfit_suggestion"], session["selected_item"]
             )

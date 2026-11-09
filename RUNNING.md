@@ -1,5 +1,203 @@
 # Running FitFindr
 
+## Capstone run path (Path B — local with logs)
+
+**Environment:** Python 3.11–3.13 (developed on 3.12.0), dependencies pinned in
+`requirements.txt`. No local model files; the only external service is the
+Gemini API, so you need a `GEMINI_API_KEY`.
+
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+copy .env.example .env          # paste your GEMINI_API_KEY into .env
+python measure.py               # runs 12 queries, writes logs/runs.jsonl
+```
+
+Single query: `python app.py ask 'trainers size 8'`. Every run (finished, empty
+search, or crashed) appends one JSON line to `logs/runs.jsonl`.
+Read it back with `python runlog.py` or `python runlog.py --tail 10`.
+
+[1] parse_query
+      in:  vintage graphic tee under $30
+      out: dict with keys: description, size, max_price
+[2] search_listings (via MCP)
+      in:  dict with keys: description, size, max_price
+      out: 10 items: Y2K Baby Tee — Butterfly Print, Vintage Band Tee — Faded Grey, Graphic Tee — 2003 Tour Bootleg Style … +7 more
+[3] select_item
+      in:  10 candidates
+      out: Y2K Baby Tee — Butterfly Print ($18.0, depop)
+[4] suggest_outfit
+      in:  dict with keys: item_id, item, wardrobe_items
+      out: You should definitely grab this baby tee! At just $18, it's an easy win that will look amazing paired with you…
+[5] create_fit_card
+      in:  dict with keys: item
+      out: Found the absolute dreamiest Y2K Baby Tee — Butterfly Print scrolling on depop this morning and I am so obsess…
+[6] parse_query
+      in:  t-shirt under $25
+      out: dict with keys: description, size, max_price
+[7] search_listings (via MCP)
+      in:  dict with keys: description, size, max_price
+      out: 4 items: Mesh Long-Sleeve Top — Black, Y2K Baby Tee — Butterfly Print, Vintage Band Tee — Faded Grey … +1 more
+[8] select_item
+      in:  4 candidates
+      out: Mesh Long-Sleeve Top — Black ($15.0, depop)
+[9] suggest_outfit
+      in:  dict with keys: item_id, item, wardrobe_items
+      out: **Outfit 1: 90s Grunge Streetwear** Layer the mesh top under your **white ribbed tank top** (w_003) for contra…
+[10] create_fit_card
+      in:  dict with keys: item
+      out: Scored this sheer black Mesh Long-Sleeve Top on depop for literally $15 and I am so obsessed with the 90s grun…
+[11] parse_query
+      in:  trainers size 8
+      out: dict with keys: description, size, max_price
+[12] search_listings (via MCP)
+      in:  dict with keys: description, size, max_price
+      out: 1 items: Platform Sneakers — White Chunky Sole
+[13] select_item
+      in:  1 candidates
+      out: Platform Sneakers — White Chunky Sole ($48.0, poshmark)
+[14] suggest_outfit
+      in:  dict with keys: item_id, item, wardrobe_items
+      out: **Outfit 1: Off-Duty Model Y2K** Pair the platform sneakers with your *Baggy straight-leg jeans* (w_001) and t…
+[15] create_fit_card
+      in:  dict with keys: item
+      out: Found the ultimate off-duty model sneakers on Poshmark for just $48 and I am never taking them off! The chunky…
+[16] parse_query
+      in:  trousers under $40
+      out: dict with keys: description, size, max_price
+[17] search_listings (via MCP)
+      in:  dict with keys: description, size, max_price
+      out: 4 items: Low-Rise Cargo Pants — Khaki, Straight Leg Khaki Trousers — Olive, Corduroy Wide-Leg Pants — Rust … +1more
+[18] select_item
+      in:  4 candidates
+      out: Low-Rise Cargo Pants — Khaki ($27.0, poshmark)
+[19] suggest_outfit
+      in:  dict with keys: item_id, item, wardrobe_items
+      out: **Outfit 1: The Ultimate Y2K Streetwear Look** Pair the low-rise cargo pants with your fitted **white ribbed t…
+[20] create_fit_card
+      in:  dict with keys: item
+      out: Obsessed with these Low-Rise Cargo Pants I just scored on Poshmark for only $27! They’ve got that perfect slou…
+[21] parse_query
+      in:  purse under $30
+      out: dict with keys: description, size, max_price
+[22] search_listings (via MCP)
+      in:  dict with keys: description, size, max_price
+      out: [] (empty)
+[23] branch: empty search
+      out: Nothing matched 'purse'. To get results, raise your price limit above $30, or use fewer or more general keywor…
+      →    stopping before suggest_outfit
+[24] parse_query
+      in:  jumper under $35
+      out: dict with keys: description, size, max_price
+[25] search_listings (via MCP)
+      in:  dict with keys: description, size, max_price
+      out: 3 items: Vintage Knit Vest — Argyle Brown/Cream, Vintage Graphic Hoodie — Faded Black, Knit Cardigan — Chunky Brown
+[26] select_item
+      in:  3 candidates
+      out: Vintage Knit Vest — Argyle Brown/Cream ($25.0, thredUp)
+[27] suggest_outfit
+      in:  dict with keys: item_id, item, wardrobe_items
+      out: **Outfit 1: Modern Dark Academia** Layer the vintage argyle vest over your **white ribbed tank top (w_003)** a…
+[28] create_fit_card
+      in:  dict with keys: item
+      out: Just scored this Vintage Knit Vest on thredUp for only $25 and I am so obsessed with the dark academia vibes! …
+[29] parse_query
+      in:  denim jacket under $50
+      out: dict with keys: description, size, max_price
+[30] search_listings (via MCP)
+      in:  dict with keys: description, size, max_price
+      out: 7 items: Denim Jacket — Light Wash, Cropped, High-Waisted Denim Shorts — Cutoff, Denim Vest — Medium Wash, Studded … +4 more
+[31] select_item
+      in:  7 candidates
+      out: Denim Jacket — Light Wash, Cropped ($42.0, poshmark)
+[32] suggest_outfit
+      in:  dict with keys: item_id, item, wardrobe_items
+      out: **Outfit 1: The Canadian Tuxedo (Two-Tone Denim)** Pair the light wash Wrangler jacket (`lst_007`) with your b…
+[33] create_fit_card
+      in:  dict with keys: item
+      out: Obsessed is an understatement for how I feel about this vintage Wrangler Denim Jacket I just scored on Poshmar…
+[34] parse_query
+      in:  90s track jacket in size M
+      out: dict with keys: description, size, max_price
+[35] search_listings (via MCP)
+      in:  dict with keys: description, size, max_price
+      out: 4 items: 90s Track Jacket — Navy/White Stripe, 90s Leather Bomber — Black, 90s Silk Slip Dress — Floral, Midi Length … +1 more
+[36] select_item
+      in:  4 candidates
+      out: 90s Track Jacket — Navy/White Stripe ($45.0, poshmark)
+[37] suggest_outfit
+      in:  dict with keys: item_id, item, wardrobe_items
+      out: **Outfit 1: Off-Duty Streetwear** Pair the Champion track jacket with your **white ribbed tank top** (w_003) a…
+  [rate limit] service pushed back. Waiting 4s (attempt 1 of 5). This is the limiter doing its job, not a bug.
+[38] create_fit_card
+      in:  dict with keys: item
+      out: Finally scored this vintage Champion 90s Track Jacket on Poshmark for only $45 and I am never taking it off. I…
+[39] parse_query
+      in:  hoodie under $30
+      out: dict with keys: description, size, max_price
+[40] search_listings (via MCP)
+      in:  dict with keys: description, size, max_price
+      out: 1 items: Vintage Graphic Hoodie — Faded Black
+[41] select_item
+      in:  1 candidates
+      out: Vintage Graphic Hoodie — Faded Black ($26.0, depop)
+  [rate limit] 15 requests used this minute. Waiting 35s. This is normal.
+[42] suggest_outfit
+      in:  dict with keys: item_id, item, wardrobe_items
+      out: **Outfit 1: Effortless 90s Grunge**   Pair the vintage faded black hoodie (`lst_015`) with your baggy dark-was…
+[43] create_fit_card
+      in:  dict with keys: item
+      out: Finally found the ultimate 90s grunge staple on depop and I'm obsessed with how perfectly broken-in it is. Thi…
+[44] parse_query
+      in:  oversized flannel shirt
+      out: dict with keys: description, size, max_price
+[45] search_listings (via MCP)
+      in:  dict with keys: description, size, max_price
+      out: 7 items: Oversized Flannel Shirt — Plaid Red/Black, Tie-Dye Long Sleeve — Pastel, Vintage Polo Shirt — Forest Green … +4 more
+[46] select_item
+      in:  7 candidates
+      out: Oversized Flannel Shirt — Plaid Red/Black ($22.0, thredUp)
+[47] suggest_outfit
+      in:  dict with keys: item_id, item, wardrobe_items
+      out: **Outfit 1: 90s Grunge Casual**   Pair the Woolrich flannel over the **white ribbed tank top (w_003)** and **b…
+[48] create_fit_card
+      in:  dict with keys: item
+      out: scored this vintage Woolrich Oversized Flannel Shirt on thredUp for just $22 and I'm honestly obsessed. The re…
+[49] parse_query
+      in:  mesh top under $20
+      out: dict with keys: description, size, max_price
+[50] search_listings (via MCP)
+      in:  dict with keys: description, size, max_price
+      out: 8 items: Mesh Long-Sleeve Top — Black, Henley Long Sleeve — Washed Burgundy, Tie-Dye Long Sleeve — Pastel … +5 more
+[51] select_item
+      in:  8 candidates
+      out: Mesh Long-Sleeve Top — Black ($15.0, depop)
+[52] suggest_outfit
+      in:  dict with keys: item_id, item, wardrobe_items
+      out: **Outfit 1: 90s Grunge Streetwear** Layer the mesh top under your white ribbed tank top (w_003) for a textured…
+[53] create_fit_card
+      in:  dict with keys: item
+      out: scored this Mesh Long-Sleeve Top on depop for literally just $15 and I am so obsessed with it. the dark goth a…
+[54] parse_query
+      in:  designer ballgown size XXS under $5
+      out: dict with keys: description, size, max_price
+[55] search_listings (via MCP)
+      in:  dict with keys: description, size, max_price
+      out: [] (empty)
+[56] branch: empty search
+      out: Nothing matched 'designer ballgown'. To get results, raise your price limit above $5, or try a different size …
+      →    stopping before suggest_outfit
+
+12 runs logged, 10 completed
+mean duration (completed): 7.19s
+mean prompt tokens:        984
+mean output tokens:        227
+mean model calls:          2.1
+21 model calls this session, 9844 prompt + 2266 output tokens
+
+---
+
 Everything about how the starter works and how to use it.
 
 ---
